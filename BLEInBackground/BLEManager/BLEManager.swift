@@ -11,12 +11,15 @@ import CoreBluetooth
 
 struct BLEParameters
 {
-    static let BLEThermometerUUID = CBUUID(string: "0x1809")
+    static let BLEThermometerUUID = CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
     //static let BLEBottleServiceUUID = CBUUID(string: "D751D8FD-CE5E-46E8-BABO-368CCE91B100") // Health Termometer
     //static let BLEBottleServiceUUID = CBUUID(string: "4038708D-7126-44B8-5406-F56F0266A2C7") // iPhone SE
     //static let BLEBottleServiceUUID = CBUUID(string: "C3AB8BE1-BB12-45BB-BC47-CF960AAB4AC5")
     static let BaswenCBCentralRestorationKey = "com.baswen.restorekey.central"
     static let BaswenCBPeripheralRestorationKey = "com.baswen.restorekey.peripheral"
+    static let  BLEBottleCharacteristicOneUUID = CBUUID(string: "6e400002-b5a3-f393-e0a9-e50e24dcca9e")
+    static let  BLEBottleCharacteristicTwoUUID = CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
+
 }
 
 struct BLENotifications
@@ -41,7 +44,7 @@ class BLEManager: NSObject
     static let sharedInstance = BLEManager()
     
     var centralManager: CBCentralManager!
-    var peripheral: CBPeripheral!
+    var baswenPeripheral: CBPeripheral!
     var isCentralRestoring: Bool = false
     var restoredCentralIdentifier: String? = nil
     var restoredPeripheralIdentifier: String? = nil
@@ -50,6 +53,8 @@ class BLEManager: NSObject
     private var isScanning = false
     private let scanTime = 120
     var previousValue: String = ""
+    
+    var txCharacteristic: CBCharacteristic!
     
     private override init()
     {
@@ -161,15 +166,15 @@ extension BLEManager: CBCentralManagerDelegate {
         self.centralManager.stopScan()
         
         // Copy the peripheral instance
-        self.peripheral = peripheral
-        self.peripheral.delegate = self
+        self.baswenPeripheral = peripheral
+        self.baswenPeripheral.delegate = self
         
         // Connect!
-        self.centralManager.connect(self.peripheral, options: [CBConnectPeripheralOptionNotifyOnConnectionKey : true, CBConnectPeripheralOptionNotifyOnNotificationKey : true, CBConnectPeripheralOptionNotifyOnDisconnectionKey : true])
+        self.centralManager.connect(self.baswenPeripheral, options: [CBConnectPeripheralOptionNotifyOnConnectionKey : true, CBConnectPeripheralOptionNotifyOnNotificationKey : true, CBConnectPeripheralOptionNotifyOnDisconnectionKey : true])
     }
     
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        if peripheral == self.peripheral {
+        if peripheral == self.baswenPeripheral {
             print("Connected to your Particle Board")
             peripheral.discoverServices(nil)
         }
@@ -177,7 +182,7 @@ extension BLEManager: CBCentralManagerDelegate {
     
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?)
     {
-        UserNotification.sharedInstance.sendNotification(with: "didDisconnectPeripheral")
+         UserNotification.sharedInstance.sendNotification(with: "didDisconnectPeripheral")
         let connectedMatchingBles = self.pairedBleDevices.filter({ (ble) -> Bool in
             return ble.peripheral.identifier.uuidString == peripheral.identifier.uuidString
         })
@@ -245,7 +250,8 @@ extension BLEManager: CBPeripheralDelegate {
         
         for service in services {
             print("CBPeripheralDelegate: peripheral didDiscoverServices === \(service)")
-            peripheral.discoverCharacteristics(nil, for: service)
+            peripheral.discoverCharacteristics([BLEParameters.BLEBottleCharacteristicOneUUID, BLEParameters.BLEBottleCharacteristicTwoUUID], for: service)
+            
         }
     }
     
@@ -255,10 +261,19 @@ extension BLEManager: CBPeripheralDelegate {
             print("CBPeripheralDelegate: peripheral not find characteristics For === \(service)")
             return
         }
+        
         for characteristic in characteristics {
             print("characteristic found for service === \(service)\n  characteristic == \(characteristic)")
-            peripheral.setNotifyValue(true, for: characteristic)
+            
+            if characteristic.uuid == BLEParameters.BLEBottleCharacteristicTwoUUID {
+                peripheral.setNotifyValue(true, for: characteristic)
+            }
         }
+        
+        self.txCharacteristic = characteristics[0]
+        
+        self.activatePeripheralForCount(peripheral: peripheral, charecteristic: characteristics[0])
+
     }
     
     func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
@@ -288,6 +303,44 @@ extension BLEManager: CBPeripheralDelegate {
                 }
                 UserNotification.sharedInstance.sendNotification(with: previousValue)
             }
+        }
+        
+//        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: {
+//            self.activatePeripheralForCount(peripheral: peripheral, charecteristic: self.txCharacteristic)
+//        })
+        
+    }
+}
+
+extension BLEManager {
+    func stringToBytes(_ hexString: String) -> [UInt8]? {
+        let length = hexString.count
+        if length & 1 != 0 {
+            return nil
+        }
+        var bytes = [UInt8]()
+        bytes.reserveCapacity(length/2)
+        var index = hexString.startIndex
+        for _ in 0..<length/2 {
+            let nextIndex = hexString.index(index, offsetBy: 2)
+            if let b = UInt8(hexString[index..<nextIndex], radix: 16) {
+                bytes.append(b)
+            } else {
+                return nil
+            }
+            index = nextIndex
+        }
+        return bytes
+    }
+    
+    func activatePeripheralForCount(peripheral : CBPeripheral, charecteristic: CBCharacteristic) {
+        if peripheral.state == CBPeripheralState.connected {
+            let value = self.stringToBytes("2a02")
+            
+            let data = NSData(bytes: value, length: 2)
+            
+            peripheral.writeValue(data as Data, for: charecteristic, type: CBCharacteristicWriteType.withResponse)
+            
         }
     }
 }

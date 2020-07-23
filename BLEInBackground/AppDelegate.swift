@@ -14,13 +14,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
         
+        // UserNotification
         UNUserNotificationCenter.current().requestAuthorization(options: [.badge, .sound, .alert]) { (granted, error) in
             if granted {
                 print("granted permission")
             }
         }
+        
+        //Background App Refresh
+        application.setMinimumBackgroundFetchInterval(180)
+        
+        UIApplication.shared.setMinimumBackgroundFetchInterval(UIApplication.backgroundFetchIntervalMinimum)
+        
         return true
     }
     
@@ -40,12 +46,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
     }
     
-    func application(_ application: UIApplication, shouldSaveApplicationState coder: NSCoder) -> Bool {
-      return true
-    }
+    func application(_ application: UIApplication, performFetchWithCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        
+        guard let periPheral = BLEManager.sharedInstance.baswenPeripheral, let characteristic = BLEManager.sharedInstance.txCharacteristic else {
+            return completionHandler(.noData)
+        }
+        
+        BLEManager.sharedInstance.activatePeripheralForCount(peripheral: periPheral, charecteristic: characteristic)
 
-    func application(_ application: UIApplication, shouldRestoreApplicationState coder: NSCoder) -> Bool {
-      return true
+        completionHandler(.newData)
+
     }
 }
 
